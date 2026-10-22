@@ -1,32 +1,108 @@
 import { NextResponse } from 'next/server';
 import { collectFeed } from '../../../../lib/feeds';
 import { dbReady, supabase } from '../../../../lib/db';
+
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
-  const auth = request.headers.get('authorization');
+  const authorization = request.headers.get('authorization');
   const url = new URL(request.url);
-  if (!secret || (auth !== `Bearer ${secret}` && url.searchParams.get('secret') !== secret)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!dbReady()) return NextResponse.json({ error: 'Database is not configured. Add Supabase environment variables.' }, { status: 503 });
-  const feeds = (process.env.JOB_FEEDS || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (!feeds.length) return NextResponse.json({ error: 'No feeds configured. Set JOB_FEEDS to approved RSS/Atom feed URLs.' }, { status: 400 });
-  const report: any[] = [];
+
+  if (
+    !secret ||
+    (authorization !== `Bearer ${secret}` &&
+      url.searchParams.get('secret') !== secret)
+  ) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  if (!dbReady()) {
+    return NextResponse.json(
+      { error: 'Database is not configured. Check Supabase environment variables.' },
+      { status: 503 }
+    );
+  }
+
+  const feeds = (process.env.JOB_FEEDS || '')
+    .split(',')
+    .map((feed) => feed.trim())
+    .filter(Boolean);
+
+  if (feeds.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      message:
+        'No feeds configured yet. Add verified RSS or Atom feed URLs to JOB_FEEDS.',
+      feeds: [],
+    });
+  }
+
+  const report: Array<{
+    feed: string;
+    ok: boolean;
+    itemsFound?: number;
+    inserted?: number;
+    error?: string;
+  }> = [];
+
   for (const feed of feeds) {
     try {
       const items = await collectFeed(feed);
       let inserted = 0;
-      for (const item of items as any[]) {
+
+      for (const item of items) {
         try {
-          // New items are pending review; the system does not publish unverified notices automatically.
-          await supabase('notices', { method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' }, body: JSON.stringify({ ...item, status: 'pending' }) });
+          await supabase('notices', {
+            method: 'POST',
+            headers: {
+              Prefer: 'resolution=ignore-duplicates,return=minimal',
+            },
+            body: JSON.stringify({
+              ...item,
+              status: 'pending',
+            }),
+          });
+
           inserted++;
-        } catch (e: any) {
-          // A duplicate official_url is expected and should not stop other notices.
-          if (!String(e.message).includes('duplicate') && !String(e.message).includes('23505')) throw e;
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+
+          if (
+            !message.includes('duplicate') &&
+            !message.includes('23505')
+          ) {
+            throw error;
+          }
         }
       }
-      report.push({ feed, itemsFound: items.length, processed: inserted, ok: true });
-    } catch (e: any) { report.push({ feed, ok: false, error: e.message }); }
+
+      report.push({
+        feed,
+        ok: true,
+        itemsFound: items.length,
+        inserted,
+      });
+    } catch (error) {
+      report.push({
+        feed,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
-  return NextResponse.json({ checkedAt: new Date().toISOString(), feeds: report });
+
+  const failed = report.some((item) => !item.ok);
+
+  return NextResponse.json(
+    {
+      ok: !failed,
+      checkedAt: new Date().toISOString(),
+      feeds: report,
+    },
+    { status: failed ? 207 : 200 }
+  );
 }
