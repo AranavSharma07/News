@@ -8,13 +8,9 @@ export const runtime = 'nodejs';
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
   const authorization = request.headers.get('authorization');
-  const url = new URL(request.url);
 
-  if (
-    !secret ||
-    (authorization !== `Bearer ${secret}` &&
-      url.searchParams.get('secret') !== secret)
-  ) {
+  // Accept secrets only in the Authorization header; query strings can leak into logs.
+  if (!secret || authorization !== `Bearer ${secret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -55,10 +51,10 @@ export async function GET(request: Request) {
 
       for (const item of items) {
         try {
-          await supabase('notices', {
+          const created = await supabase('notices', {
             method: 'POST',
             headers: {
-              Prefer: 'resolution=ignore-duplicates,return=minimal',
+              Prefer: 'resolution=ignore-duplicates,return=representation',
             },
             body: JSON.stringify({
               ...item,
@@ -66,7 +62,7 @@ export async function GET(request: Request) {
             }),
           });
 
-          inserted++;
+          if (Array.isArray(created) && created.length > 0) inserted++;
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);

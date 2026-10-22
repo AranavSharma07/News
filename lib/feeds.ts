@@ -105,7 +105,11 @@ export async function collectFeed(url: string) {
       title: title.slice(0, 500),
       category: categorize(title),
       summary: description.slice(0, 2000),
-      official_url: officialUrl.toString(),
+      // A feed item is not proof of an official destination. Keep it as an article
+      // URL and require a reviewer to add/verify the issuing body's official URL.
+      official_url: null,
+      article_url: officialUrl.toString(),
+      official_verified: false,
       source_url: parsedUrl.toString(),
       source_name:
         process.env.DEFAULT_SOURCE_NAME || parsedUrl.hostname,
