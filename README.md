@@ -1,13 +1,14 @@
 # NaukriSetu — Jobs, Results & Education Updates
 
-A polished, responsive Next.js 14 portal for discovering jobs, exam results, admit cards, answer keys, admissions and official notifications. The project includes a Supabase-backed notice API, a protected RSS/Atom ingestion endpoint, and a protected moderation API. Feed entries remain **pending until a person reviews them**.
+A polished, responsive Next.js 14 portal for discovering jobs, exam results, admit cards, answer keys, admissions and official notifications. The project includes a Supabase-backed notice API, a protected RSS/Atom ingestion endpoint, and a protected moderation API. It includes conservative automatic verification for notices whose official destination can be matched against an explicit trusted-domain allowlist; uncertain notices remain pending.
 
 ## What’s included
 
 - Responsive, accessible homepage with search, category filters, loading/error/empty states and manual refresh.
 - SEO metadata, Open Graph/Twitter metadata, and generated `robots.txt` and `sitemap.xml`.
 - Supabase REST API for published notices; secrets remain server-side.
-- Scheduled feed ingestion via Vercel Cron; entries are stored as pending and duplicate official URLs are ignored.
+- Scheduled feed ingestion via Vercel Cron; duplicate feed entries are ignored.
+- Conservative automatic verification: a pending notice is published only when its destination is on the explicit `OFFICIAL_DOMAINS` allowlist and the fetched page content matches the notice title. Aggregator pages are scanned only for links to allowlisted official domains; uncertain notices remain pending.
 - Admin review dashboard at `/admin` to inspect pending notices, edit details, verify official URLs, publish or reject records.
 - Feed article URLs are stored separately; ingestion does not claim third-party article links are official.
 - Security improvement: cron secret is accepted only in the Authorization header, not in query strings.
@@ -53,6 +54,7 @@ The homepage can run without Supabase but will show a setup message until databa
 | `ADMIN_SECRET` | Yes for moderation | Different long random secret for admin actions |
 | `JOB_FEEDS` | Yes for ingestion | Comma-separated RSS/Atom feed URLs you are permitted to monitor |
 | `DEFAULT_SOURCE_NAME` | No | Default source label for ingested notices |
+| `OFFICIAL_DOMAINS` | Recommended for auto-publishing | Comma-separated exact official domains, e.g. `ssc.gov.in,upsc.gov.in`; never add aggregator domains. Leave empty to disable automatic publishing safely. |
 | `NEXT_PUBLIC_SITE_URL` | Recommended | Canonical public site URL used for metadata and sitemap |
 
 Generate separate secrets; do not reuse the same value for `CRON_SECRET` and `ADMIN_SECRET`.
@@ -61,12 +63,12 @@ Generate separate secrets; do not reuse the same value for `CRON_SECRET` and `AD
 
 Vercel Cron calls `/api/cron/ingest` on the schedule configured in `vercel.json`. The request must include `Authorization: Bearer YOUR_CRON_SECRET`. For a manual test, send that header from a secure API client; do not place the secret in a URL or browser code.
 
-Use `/admin` for the visual review workflow. The protected API uses `Authorization: Bearer YOUR_ADMIN_SECRET`. Publishing requires a valid HTTP(S) URL and the reviewer checkbox `official_verified: true`.
+Use `/admin` for the visual review workflow. The protected API uses `Authorization: Bearer YOUR_ADMIN_SECRET`. Publishing requires a valid HTTP(S) URL and `official_verified: true`. On each cron run, up to 40 pending records with article URLs are checked automatically. The verifier fails closed: it will not publish unless a destination page is reachable, the final hostname is on `OFFICIAL_DOMAINS`, and the page text sufficiently matches the notice title. For aggregator feeds, only links to allowlisted official domains are considered. Configure `OFFICIAL_DOMAINS` in Vercel Project Settings → Environment Variables and redeploy. Notices that cannot be confidently verified remain pending for manual review.
 
 ## Important limitations and accuracy
 
 - This is a starter portal, not a universal government-site crawler. Add only feeds you are allowed to monitor; many official sites do not publish RSS/Atom feeds.
-- Category assignment is keyword-based and can be wrong. Review notices before publication.
+- Category assignment is keyword-based and can be wrong. Automated title matching is a conservative heuristic, not a guarantee of factual correctness; keep the allowlist narrow and periodically audit auto-published notices.
 - Check dates, eligibility, fees and final application/download links against the official source.
 - Do not bypass CAPTCHAs, logins, rate limits or access controls.
 - The admin API and dashboard are protected by `ADMIN_SECRET`. Keep it private and rotate it if exposed. The dashboard is intended for a trusted administrator; do not share the secret with visitors.
